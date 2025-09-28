@@ -428,7 +428,12 @@ impl Register {
     const MONTH: u8 = 0x05;
     const YEAR: u8 = 0x06;
     const ALARM1_SECONDS: u8 = 0x07;
+    const ALARM1_MINUTES: u8 = 0x08;
+    const ALARM1_HOURS: u8 = 0x09;
+    const ALARM1_DAY_DATE: u8 = 0x0A;
     const ALARM2_MINUTES: u8 = 0x0B;
+    const ALARM2_HOURS: u8 = 0x0C;
+    const ALARM2_DAY_DATE: u8 = 0x0D;
     const CONTROL: u8 = 0x0E;
     const STATUS: u8 = 0x0F;
     const AGING_OFFSET: u8 = 0x10;

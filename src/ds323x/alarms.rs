@@ -1,6 +1,6 @@
 //! Alarm support
 
-use super::{decimal_to_packed_bcd, hours_to_register};
+use super::{decimal_to_packed_bcd, hours_to_register, packed_bcd_to_decimal};
 use crate::{
     ds323x::{NaiveTime, Timelike},
     interface::{ReadData, WriteData},
@@ -147,6 +147,29 @@ fn amend_hour(hours: Hours) -> Hours {
         Hours::AM(h) => Hours::AM(h),
         Hours::PM(h) if !(1..=12).contains(&h) => Hours::PM(1),
         Hours::PM(h) => Hours::PM(h),
+    }
+}
+
+/// Helper functions for parsing alarm register data
+fn is_24h_format(hour_register: u8) -> bool {
+    (hour_register & BitFlags::H24_H12) == 0
+}
+
+fn is_am(hour_register: u8) -> bool {
+    (hour_register & BitFlags::AM_PM) == 0
+}
+
+fn hours_from_register(data: u8) -> Hours {
+    if is_24h_format(data) {
+        Hours::H24(packed_bcd_to_decimal(data & !BitFlags::H24_H12))
+    } else if is_am(data) {
+        Hours::AM(packed_bcd_to_decimal(
+            data & !(BitFlags::H24_H12 | BitFlags::AM_PM),
+        ))
+    } else {
+        Hours::PM(packed_bcd_to_decimal(
+            data & !(BitFlags::H24_H12 | BitFlags::AM_PM),
+        ))
     }
 }
 
@@ -336,5 +359,121 @@ where
             decimal_to_packed_bcd(weekday) | match_mask[2] | BitFlags::WEEKDAY,
         ];
         self.iface.write_data(&mut data)
+    }
+
+    /// Read Alarm1 configuration from DS3231 registers
+    ///
+    /// Returns the current Alarm1 configuration if enabled, or None if disabled.
+    /// The alarm is considered disabled if all mask bits are set.
+    pub fn read_alarm1_config(&mut self) -> Result<Option<(DayAlarm1, Alarm1Matching)>, Error<E>> {
+        // Read all 4 alarm1 registers: seconds, minutes, hours, day/date
+        let mut alarm_regs = [0u8; 4];
+
+        // Read individual registers
+        alarm_regs[0] = self.iface.read_register(Register::ALARM1_SECONDS)?;
+        alarm_regs[1] = self.iface.read_register(Register::ALARM1_MINUTES)?;
+        alarm_regs[2] = self.iface.read_register(Register::ALARM1_HOURS)?;
+        alarm_regs[3] = self.iface.read_register(Register::ALARM1_DAY_DATE)?;
+
+        // Parse the alarm configuration
+        self.parse_alarm1_registers(&alarm_regs)
+    }
+
+    /// Read Alarm2 configuration from DS3231 registers
+    ///
+    /// Returns the current Alarm2 configuration if enabled, or None if disabled.
+    /// The alarm is considered disabled if all mask bits are set.
+    pub fn read_alarm2_config(&mut self) -> Result<Option<(DayAlarm2, Alarm2Matching)>, Error<E>> {
+        // Read all 3 alarm2 registers: minutes, hours, day/date
+        let mut alarm_regs = [0u8; 3];
+
+        // Read individual registers
+        alarm_regs[0] = self.iface.read_register(Register::ALARM2_MINUTES)?;
+        alarm_regs[1] = self.iface.read_register(Register::ALARM2_HOURS)?;
+        alarm_regs[2] = self.iface.read_register(Register::ALARM2_DAY_DATE)?;
+
+        // Parse the alarm configuration
+        self.parse_alarm2_registers(&alarm_regs)
+    }
+
+    /// Parse Alarm1 register data into structured configuration
+    fn parse_alarm1_registers(&self, regs: &[u8; 4]) -> Result<Option<(DayAlarm1, Alarm1Matching)>, Error<E>> {
+        let seconds_reg = regs[0];
+        let minutes_reg = regs[1];
+        let hours_reg = regs[2];
+        let day_date_reg = regs[3];
+
+        // Check mask bits to determine matching strategy
+        let seconds_mask = (seconds_reg & BitFlags::ALARM_MATCH) != 0;
+        let minutes_mask = (minutes_reg & BitFlags::ALARM_MATCH) != 0;
+        let hours_mask = (hours_reg & BitFlags::ALARM_MATCH) != 0;
+        let day_date_mask = (day_date_reg & BitFlags::ALARM_MATCH) != 0;
+
+        // Determine matching strategy from mask pattern
+        let matching = match (seconds_mask, minutes_mask, hours_mask, day_date_mask) {
+            (true, true, true, true) => return Ok(None), // All masks set = disabled
+            (true, true, true, false) => Alarm1Matching::OncePerSecond,
+            (false, true, true, true) => Alarm1Matching::SecondsMatch,
+            (false, false, true, true) => Alarm1Matching::MinutesAndSecondsMatch,
+            (false, false, false, true) => Alarm1Matching::HoursMinutesAndSecondsMatch,
+            (false, false, false, false) => Alarm1Matching::AllMatch,
+            _ => return Err(Error::InvalidInputData), // Invalid mask combination
+        };
+
+        // Parse time values from BCD
+        let second = packed_bcd_to_decimal(seconds_reg & 0x7F);
+        let minute = packed_bcd_to_decimal(minutes_reg & 0x7F);
+        let hour = hours_from_register(hours_reg & 0x3F); // Remove mask and weekday bits
+
+        // Parse day/date
+        let is_weekday = (day_date_reg & BitFlags::WEEKDAY) != 0;
+        let day_value = packed_bcd_to_decimal(day_date_reg & 0x3F);
+
+        let alarm = DayAlarm1 {
+            day: if is_weekday { day_value } else { day_value }, // Both use same field in DayAlarm1
+            hour,
+            minute,
+            second,
+        };
+
+        Ok(Some((alarm, matching)))
+    }
+
+    /// Parse Alarm2 register data into structured configuration
+    fn parse_alarm2_registers(&self, regs: &[u8; 3]) -> Result<Option<(DayAlarm2, Alarm2Matching)>, Error<E>> {
+        let minutes_reg = regs[0];
+        let hours_reg = regs[1];
+        let day_date_reg = regs[2];
+
+        // Check mask bits to determine matching strategy
+        let minutes_mask = (minutes_reg & BitFlags::ALARM_MATCH) != 0;
+        let hours_mask = (hours_reg & BitFlags::ALARM_MATCH) != 0;
+        let day_date_mask = (day_date_reg & BitFlags::ALARM_MATCH) != 0;
+
+        // Determine matching strategy from mask pattern
+        let matching = match (minutes_mask, hours_mask, day_date_mask) {
+            (true, true, true) => return Ok(None), // All masks set = disabled
+            (true, true, false) => Alarm2Matching::OncePerMinute,
+            (false, true, true) => Alarm2Matching::MinutesMatch,
+            (false, false, true) => Alarm2Matching::HoursAndMinutesMatch,
+            (false, false, false) => Alarm2Matching::AllMatch,
+            _ => return Err(Error::InvalidInputData), // Invalid mask combination
+        };
+
+        // Parse time values from BCD
+        let minute = packed_bcd_to_decimal(minutes_reg & 0x7F);
+        let hour = hours_from_register(hours_reg & 0x3F); // Remove mask and weekday bits
+
+        // Parse day/date
+        let is_weekday = (day_date_reg & BitFlags::WEEKDAY) != 0;
+        let day_value = packed_bcd_to_decimal(day_date_reg & 0x3F);
+
+        let alarm = DayAlarm2 {
+            day: if is_weekday { day_value } else { day_value }, // Both use same field in DayAlarm2
+            hour,
+            minute,
+        };
+
+        Ok(Some((alarm, matching)))
     }
 }
