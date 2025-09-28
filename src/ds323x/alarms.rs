@@ -459,7 +459,27 @@ where
             (false, false, true, true) => Alarm1Matching::MinutesAndSecondsMatch,
             (false, false, false, true) => Alarm1Matching::HoursMinutesAndSecondsMatch,
             (false, false, false, false) => Alarm1Matching::AllMatch,
-            _ => return Err(Error::InvalidInputData), // Invalid mask combination
+            // Handle other mask combinations gracefully
+            // Default to most restrictive matching that makes sense
+            _ => {
+                // Determine the most appropriate matching based on which masks are set
+                if seconds_mask && minutes_mask && hours_mask {
+                    // Most masks set, closest to OncePerSecond
+                    Alarm1Matching::OncePerSecond
+                } else if minutes_mask && hours_mask {
+                    // Seconds not masked, closest to SecondsMatch
+                    Alarm1Matching::SecondsMatch
+                } else if hours_mask {
+                    // Minutes and possibly seconds not masked
+                    Alarm1Matching::MinutesAndSecondsMatch
+                } else if day_date_mask {
+                    // Hours not masked, day might be masked
+                    Alarm1Matching::HoursMinutesAndSecondsMatch
+                } else {
+                    // Default to most specific matching
+                    Alarm1Matching::AllMatch
+                }
+            }
         };
 
         // Parse time values from BCD
@@ -499,7 +519,24 @@ where
             (false, true, true) => Alarm2Matching::MinutesMatch,
             (false, false, true) => Alarm2Matching::HoursAndMinutesMatch,
             (false, false, false) => Alarm2Matching::AllMatch,
-            _ => return Err(Error::InvalidInputData), // Invalid mask combination
+            // Handle other mask combinations gracefully
+            // Default to most restrictive matching that makes sense
+            _ => {
+                // Determine the most appropriate matching based on which masks are set
+                if minutes_mask && hours_mask {
+                    // Most masks set, closest to OncePerMinute
+                    Alarm2Matching::OncePerMinute
+                } else if hours_mask {
+                    // Minutes not masked, closest to MinutesMatch
+                    Alarm2Matching::MinutesMatch
+                } else if day_date_mask {
+                    // Hours not masked, day might be masked
+                    Alarm2Matching::HoursAndMinutesMatch
+                } else {
+                    // Default to most specific matching
+                    Alarm2Matching::AllMatch
+                }
+            }
         };
 
         // Parse time values from BCD
