@@ -361,10 +361,31 @@ where
         self.iface.write_data(&mut data)
     }
 
-    /// Read Alarm1 configuration from DS3231 registers
+    /// Read Alarm1 configuration from DS3231 registers (addresses 07h-0Ah)
     ///
     /// Returns the current Alarm1 configuration if enabled, or None if disabled.
-    /// The alarm is considered disabled if all mask bits are set.
+    ///
+    /// # DS3231 Alarm Behavior
+    ///
+    /// - **Alarm registers always contain values** - they cannot be "empty"
+    /// - **Mask bits** (bit 7 in each register) determine which fields are compared:
+    ///   - 0 = field is compared (alarm enabled for this field)
+    ///   - 1 = field is ignored (mask bit set)
+    /// - **All mask bits set** = alarm effectively disabled
+    /// - **Interrupt enable** (separate from this function) controls if alarm can fire
+    ///
+    /// # Alarm Types Detected
+    ///
+    /// Based on mask bit patterns:
+    /// - `HoursMinutesAndSecondsMatch`: Daily alarm (fires every day at specific time)
+    /// - `AllMatch`: Day-specific or weekday alarm (determined by DY/DT bit)
+    /// - Other patterns: Special matching strategies
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some((alarm, matching)))` - Alarm configuration and matching strategy
+    /// - `Ok(None)` - All mask bits set (alarm disabled)
+    /// - `Err(_)` - I2C communication error
     pub fn read_alarm1_config(&mut self) -> Result<Option<(DayAlarm1, Alarm1Matching)>, Error<E>> {
         // Read all 4 alarm1 registers: seconds, minutes, hours, day/date
         let mut alarm_regs = [0u8; 4];
@@ -379,10 +400,31 @@ where
         self.parse_alarm1_registers(&alarm_regs)
     }
 
-    /// Read Alarm2 configuration from DS3231 registers
+    /// Read Alarm2 configuration from DS3231 registers (addresses 0Bh-0Dh)
     ///
     /// Returns the current Alarm2 configuration if enabled, or None if disabled.
-    /// The alarm is considered disabled if all mask bits are set.
+    ///
+    /// # DS3231 Alarm2 Behavior
+    ///
+    /// Alarm2 is similar to Alarm1 but **has no seconds precision** - only minutes and hours.
+    ///
+    /// - **Alarm registers always contain values** - they cannot be "empty"
+    /// - **Mask bits** (bit 7 in each register) determine which fields are compared
+    /// - **All mask bits set** = alarm effectively disabled
+    /// - **Interrupt enable** (separate from this function) controls if alarm can fire
+    ///
+    /// # Alarm Types Detected
+    ///
+    /// Based on mask bit patterns:
+    /// - `HoursAndMinutesMatch`: Daily alarm (fires every day at specific time)
+    /// - `AllMatch`: Day-specific or weekday alarm (determined by DY/DT bit)
+    /// - Other patterns: Special matching strategies
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some((alarm, matching)))` - Alarm configuration and matching strategy
+    /// - `Ok(None)` - All mask bits set (alarm disabled)
+    /// - `Err(_)` - I2C communication error
     pub fn read_alarm2_config(&mut self) -> Result<Option<(DayAlarm2, Alarm2Matching)>, Error<E>> {
         // Read all 3 alarm2 registers: minutes, hours, day/date
         let mut alarm_regs = [0u8; 3];
@@ -475,5 +517,27 @@ where
         };
 
         Ok(Some((alarm, matching)))
+    }
+
+    /// Read Alarm1 interrupt enable status from DS3231 Control register
+    ///
+    /// Returns true if Alarm1 interrupts are enabled, false if disabled.
+    /// This determines whether the alarm can actually trigger an interrupt.
+    ///
+    /// Note: An alarm can be configured but won't fire unless interrupts are enabled.
+    pub fn read_alarm1_interrupt_enabled(&mut self) -> Result<bool, Error<E>> {
+        let control_reg = self.iface.read_register(Register::CONTROL)?;
+        Ok((control_reg & BitFlags::ALARM1_INT_EN) != 0)
+    }
+
+    /// Read Alarm2 interrupt enable status from DS3231 Control register
+    ///
+    /// Returns true if Alarm2 interrupts are enabled, false if disabled.
+    /// This determines whether the alarm can actually trigger an interrupt.
+    ///
+    /// Note: An alarm can be configured but won't fire unless interrupts are enabled.
+    pub fn read_alarm2_interrupt_enabled(&mut self) -> Result<bool, Error<E>> {
+        let control_reg = self.iface.read_register(Register::CONTROL)?;
+        Ok((control_reg & BitFlags::ALARM2_INT_EN) != 0)
     }
 }
