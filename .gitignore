@@ -4,3 +4,9 @@
 Cargo.lock
 .gdb_history
 
+*~
+history_init.log
+
+.git
+.github
+
