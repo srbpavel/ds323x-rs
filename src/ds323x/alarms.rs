@@ -453,7 +453,7 @@ where
 
         // Determine matching strategy from mask pattern
         let matching = match (seconds_mask, minutes_mask, hours_mask, day_date_mask) {
-            (true, true, true, true) => return Ok(None), // All masks set = disabled
+            (true, true, true, true) => Alarm1Matching::OncePerSecond, // All masks = every second
             (true, true, true, false) => Alarm1Matching::OncePerSecond,
             (false, true, true, true) => Alarm1Matching::SecondsMatch,
             (false, false, true, true) => Alarm1Matching::MinutesAndSecondsMatch,
@@ -514,7 +514,7 @@ where
 
         // Determine matching strategy from mask pattern
         let matching = match (minutes_mask, hours_mask, day_date_mask) {
-            (true, true, true) => return Ok(None), // All masks set = disabled
+            (true, true, true) => Alarm2Matching::OncePerMinute, // All masks = every minute
             (true, true, false) => Alarm2Matching::OncePerMinute,
             (false, true, true) => Alarm2Matching::MinutesMatch,
             (false, false, true) => Alarm2Matching::HoursAndMinutesMatch,
